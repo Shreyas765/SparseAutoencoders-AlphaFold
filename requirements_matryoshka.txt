@@ -1,0 +1,6 @@
+# Matryoshka SAE notebook — run on GPU cluster from VizFoldAutoencoder/
+torch>=2.0.0
+numpy
+matplotlib
+jupyter
+nbconvert
