@@ -4,7 +4,8 @@ Train the token-based Sparse Autoencoder (no spatial interpolation, packed L² t
 Usage:
   python train_token_sae.py --protein_dir /path/to/CompleteProteins [options]
 
-DataLoader uses pack_proteins_collate; loss = MSE + lambda_entropy * entropy.
+Multi-GPU: Uses DataParallel when multiple GPUs available.
+DataLoader: num_workers for parallel data loading.
 """
 
 import argparse
@@ -16,7 +17,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 
-# Import from same directory (_current_saemodel)
+# Import from same directory
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -51,7 +52,7 @@ def train_epoch(model, dataloader, optimizer, device, lambda_entropy: float):
     num_batches = 0
 
     for packed_batch, original_shapes in dataloader:
-        packed_batch = packed_batch.to(device)
+        packed_batch = packed_batch.to(device, non_blocking=True)
         optimizer.zero_grad()
 
         recon_packed, p_softmax, _ = model(packed_batch)
@@ -82,7 +83,7 @@ def evaluate(model, dataloader, device, lambda_entropy: float):
     num_batches = 0
 
     for packed_batch, _ in dataloader:
-        packed_batch = packed_batch.to(device)
+        packed_batch = packed_batch.to(device, non_blocking=True)
         recon_packed, p_softmax, _ = model(packed_batch)
 
         loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
@@ -111,13 +112,14 @@ def main():
     parser.add_argument("--layer", type=int, default=47)
     parser.add_argument("--val_frac", type=float, default=0.2, help="Fraction for validation")
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=16, help="Number of proteins per batch")
+    parser.add_argument("--batch_size", type=int, default=32, help="Number of proteins per batch")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--d_latent", type=int, default=3000)
     parser.add_argument("--tau", type=float, default=0.90, help="CDF threshold for adaptive top-k")
     parser.add_argument("--lambda_entropy", type=float, default=0.01)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers for parallel loading")
     args = parser.parse_args()
 
     protein_dir = Path(args.protein_dir)
@@ -132,24 +134,30 @@ def main():
     n_train = len(full_dataset) - n_val
     train_dataset, val_dataset = random_split(full_dataset, [n_train, n_val])
 
+    num_workers = args.num_workers if args.num_workers > 0 else 0
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=pack_proteins_collate,
-        num_workers=0,
+        num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
+        persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         collate_fn=pack_proteins_collate,
-        num_workers=0,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TokenSparseAutoencoder(d_in=128, d_latent=args.d_latent, tau=args.tau).to(device)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
+        print(f"Using {torch.cuda.device_count()} GPUs (DataParallel)")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     output_dir = Path(args.output_dir or str(protein_dir / "token_sae_output"))
@@ -172,12 +180,11 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(
-                model.state_dict(),
-                output_dir / "token_sae_best.pt",
-            )
+            state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+            torch.save(state, output_dir / "token_sae_best.pt")
 
-    torch.save(model.state_dict(), output_dir / "token_sae_final.pt")
+    state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+    torch.save(state, output_dir / "token_sae_final.pt")
     print(f"Saved best and final checkpoints to {output_dir}")
     return 0
 
