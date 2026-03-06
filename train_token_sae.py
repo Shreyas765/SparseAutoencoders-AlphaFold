@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 
-# Import from project root
+# Import from same directory (_current_saemodel)
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -96,13 +96,6 @@ def evaluate(model, dataloader, device, lambda_entropy: float):
 
     n = max(num_batches, 1)
     return total_loss / n, total_recon / n, total_entropy / n
-
-
-def unpack_reconstructions(recon_packed, original_shapes):
-    """Split packed (sum L_i^2, 128) back into list of (L_i, L_i, 128) tensors."""
-    lengths = [s[0] * s[1] for s in original_shapes]
-    chunks = torch.split(recon_packed, lengths, dim=0)
-    return [chunks[i].view(original_shapes[i]) for i in range(len(original_shapes))]
 
 
 def main():
