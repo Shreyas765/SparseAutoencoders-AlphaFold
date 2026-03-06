@@ -2,7 +2,7 @@
 
 This repository implements a mathematically rigorous, token-based Sparse Autoencoder (SAE) pipeline designed to extract highly interpretable, monosemantic features from the pairwise representations of protein language models (e.g., MIT Boltz).
 
-Unlike standard convolutional approaches that rely on spatial interpolation (which distorts biological distances), this architecture treats the $L \times L \times 128$ distance matrix as a packed sequence of variable-length tokens. It utilizes a fully vectorized, CDF-based Adaptive Top-$k$ Softmax mechanism to enforce dynamic sparsity, preventing feature superposition while maintaining perfect spatial fidelity.
+Unlike standard convolutional approaches that rely on spatial interpolation (which distorts biological distances), this architecture treats the $L \times L \times 128$ distance matrix as a packed sequence of variable-length tokens. It utilizes a fully vectorized, CDF-based Adaptive Top-k Softmax mechanism to enforce dynamic sparsity, preventing feature superposition while maintaining perfect spatial fidelity.
 
 ## Table of Contents
 
@@ -106,11 +106,11 @@ Reference PDBs (`pair_block_47_pdbs/`) must be generated separately from the ori
 
 ### Packing vs. Padding
 
-To process varying sequence lengths ($L$) efficiently without generating quadratic memory bottlenecks ($O(L^2)$), this repository implements **exact tensor packing**. Batches of spatial matrices are flattened and concatenated along the sequence dimension prior to the forward pass, and split by their original lengths during reconstruction.
+To process varying sequence lengths ($L$) efficiently without generating quadratic memory bottlenecks (O(L^2)), this repository implements **exact tensor packing**. Batches of spatial matrices are flattened and concatenated along the sequence dimension prior to the forward pass, and split by their original lengths during reconstruction.
 
-### Adaptive Top-$k$ Softmax
+### Adaptive Top-k Softmax
 
-Traditional SAEs enforce a hardcoded top-$k$ sparsity, which forces complex and simple tokens to utilize the same representational capacity. We implement a **dynamic threshold** mechanism:
+Traditional SAEs enforce a hardcoded top-k sparsity, which forces complex and simple tokens to utilize the same representational capacity. We implement a **dynamic threshold** mechanism:
 
 1. Latent pre-activations are converted to a probability distribution via **Softmax**.
 2. The elements are sorted and evaluated against a **Cumulative Distribution Function (CDF)**.
