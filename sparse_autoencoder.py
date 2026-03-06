@@ -118,3 +118,13 @@ class PairRepresentationDataset(Dataset):
             if max_val > 1e-8:
                 arr = arr / max_val
         return torch.from_numpy(arr)
+
+
+def unpack_reconstructions(recon_packed, original_shapes):
+    """
+    Split packed (sum L_i^2, 128) back into list of (L_i, L_i, 128) tensors.
+    Used by inference to recover per-protein reconstructions.
+    """
+    lengths = [s[0] * s[1] for s in original_shapes]
+    chunks = torch.split(recon_packed, lengths, dim=0)
+    return [chunks[i].view(original_shapes[i]) for i in range(len(original_shapes))]
