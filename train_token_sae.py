@@ -44,7 +44,7 @@ def discover_pair_paths(protein_dir: Path, layer: int = 47):
     return paths
 
 
-def train_epoch(model, dataloader, optimizer, device, lambda_entropy: float):
+def train_epoch(model, dataloader, optimizer, device, lambda_entropy: float, scaler=None):
     model.train()
     total_loss = 0.0
     total_recon = 0.0
@@ -55,15 +55,25 @@ def train_epoch(model, dataloader, optimizer, device, lambda_entropy: float):
         packed_batch = packed_batch.to(device, non_blocking=True)
         optimizer.zero_grad()
 
-        recon_packed, p_softmax, _ = model(packed_batch)
-
-        loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
-        entropy = -(p_softmax * (p_softmax + 1e-10).log()).sum(dim=-1).mean()
-        loss_total = loss_recon + lambda_entropy * entropy
-
-        loss_total.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
+        if scaler is not None:
+            with torch.amp.autocast(device_type="cuda"):
+                recon_packed, p_softmax, _ = model(packed_batch)
+                loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
+                entropy = -(p_softmax * (p_softmax + 1e-10).log()).sum(dim=-1).mean()
+                loss_total = loss_recon + lambda_entropy * entropy
+            scaler.scale(loss_total).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            recon_packed, p_softmax, _ = model(packed_batch)
+            loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
+            entropy = -(p_softmax * (p_softmax + 1e-10).log()).sum(dim=-1).mean()
+            loss_total = loss_recon + lambda_entropy * entropy
+            loss_total.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
 
         total_loss += loss_total.item()
         total_recon += loss_recon.item()
@@ -84,11 +94,11 @@ def evaluate(model, dataloader, device, lambda_entropy: float):
 
     for packed_batch, _ in dataloader:
         packed_batch = packed_batch.to(device, non_blocking=True)
-        recon_packed, p_softmax, _ = model(packed_batch)
-
-        loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
-        entropy = -(p_softmax * (p_softmax + 1e-10).log()).sum(dim=-1).mean()
-        loss_total = loss_recon + lambda_entropy * entropy
+        with torch.amp.autocast(device_type="cuda", enabled=torch.cuda.is_available()):
+            recon_packed, p_softmax, _ = model(packed_batch)
+            loss_recon = nn.functional.mse_loss(recon_packed, packed_batch)
+            entropy = -(p_softmax * (p_softmax + 1e-10).log()).sum(dim=-1).mean()
+            loss_total = loss_recon + lambda_entropy * entropy
 
         total_loss += loss_total.item()
         total_recon += loss_recon.item()
@@ -112,7 +122,7 @@ def main():
     parser.add_argument("--layer", type=int, default=47)
     parser.add_argument("--val_frac", type=float, default=0.2, help="Fraction for validation")
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=32, help="Number of proteins per batch")
+    parser.add_argument("--batch_size", type=int, default=8, help="Number of proteins per batch (reduce if OOM)")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--d_latent", type=int, default=3000)
     parser.add_argument("--tau", type=float, default=0.90, help="CDF threshold for adaptive top-k")
@@ -120,6 +130,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers for parallel loading")
+    parser.add_argument("--no_amp", action="store_true", help="Disable mixed precision (uses more memory)")
     args = parser.parse_args()
 
     protein_dir = Path(args.protein_dir)
@@ -160,13 +171,18 @@ def main():
         print(f"Using {torch.cuda.device_count()} GPUs (DataParallel)")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
+    use_amp = torch.cuda.is_available() and not args.no_amp
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    if use_amp:
+        print("Using mixed precision (AMP) to reduce memory")
+
     output_dir = Path(args.output_dir or str(protein_dir / "token_sae_output"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     best_val_loss = float("inf")
     for epoch in range(args.epochs):
         train_loss, train_recon, train_entropy = train_epoch(
-            model, train_loader, optimizer, device, args.lambda_entropy
+            model, train_loader, optimizer, device, args.lambda_entropy, scaler
         )
         val_loss, val_recon, val_entropy = evaluate(
             model, val_loader, device, args.lambda_entropy

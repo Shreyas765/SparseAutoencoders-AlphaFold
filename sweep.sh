@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Override with env PROTEIN_DIR or BASE; default for cluster
-PROTEIN_DIR="${PROTEIN_DIR:-${BASE:-/storage/scratch1/5/sshrestha304/Autoencoder/CompleteProteins}}"
+PROTEIN_DIR="${PROTEIN_DIR:-${BASE:-../proteins_layer47}}"
 TAU=0.90
 EPOCHS=100
 BATCH_SIZE=16

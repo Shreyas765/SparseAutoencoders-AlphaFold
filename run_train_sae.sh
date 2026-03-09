@@ -18,7 +18,7 @@
 # ========================================
 
 LATENT_DIMS=(1024 4096 8192 16384)
-export BASE=/path/to/your/CompleteProteins   # EDIT: Your protein dir on PACE scratch
+export BASE=../proteins_layer47   # Sibling of original_SAE (scripts in original_SAE/)
 
 D_LATENT=${LATENT_DIMS[$SLURM_ARRAY_TASK_ID]}
 EXPANSION=$((D_LATENT / 128))
@@ -28,6 +28,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Reduce CUDA fragmentation (helps with OOM)
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 module load anaconda3  # or: conda activate your_env
 
 echo "Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}: D_LATENT=${D_LATENT} (${EXPANSION}x) on GPU"
@@ -36,6 +39,6 @@ python train_token_sae.py \
     --d_latent "$D_LATENT" \
     --tau 0.90 \
     --epochs 100 \
-    --batch_size 32 \
+    --batch_size 8 \
     --num_workers 4 \
     --output_dir "$OUTPUT_DIR"
