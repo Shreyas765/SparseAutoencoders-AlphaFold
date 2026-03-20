@@ -47,7 +47,13 @@ CompleteProteins/
 
 ### 1. Training & Ablation
 
-The token SAE flattens spatial dimensions to process $(\sum L_i^2, 128)$ packed tokens in parallel. To conduct an ablation study across different expansion factors (e.g., testing latent capacities of 1024, 4096, 8192), specify the `--d_latent` parameter and assign isolated output directories.
+The **contextual** token SAE builds a 384-d input per $(i,j)$ by concatenating the pair token, the $i$-th diagonal token, and the $j$-th diagonal token (all vectorized). Packing yields $(\sum L_i^2, 384)$ for the encoder; reconstruction targets are $(\sum L_i^2, 128)$ pair channels. For ablations over latent size (e.g. 1024, 4096, 8192), set `--d_latent` and use separate `--output_dir` values.
+
+GPU memory probe before a long run:
+
+```bash
+python train_token_sae.py --protein_dir /path/to/CompleteProteins --smoke_batches 5 --smoke_batch_size 8
+```
 
 ```bash
 python train_token_sae.py \
