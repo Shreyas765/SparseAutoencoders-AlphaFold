@@ -7,6 +7,9 @@ __pycache__/
 *.egg-info/
 .eggs/
 
+# Large data files
+ecod.v294.1.domains.txt
+
 # Checkpoints and ablation outputs
 *.pt
 token_sae_output*/

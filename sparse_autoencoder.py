@@ -8,7 +8,7 @@ Context-aware token Sparse Autoencoder for protein pair representations.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -65,6 +65,10 @@ class ContextualTokenSAE(nn.Module):
         recon_packed: (S, d_recon_out)
         latents: (S, d_latent) after adaptive top-k
         p_softmax: (S, d_latent) softmax of pre-sparsity z (for entropy loss)
+
+    Interventions (research): pass ``latent_hook`` to :meth:`forward` to modify sparse
+    codes after adaptive top-k and before decoding, e.g. ablate dimensions or add a
+    steering vector (same shape as ``latents``).
     """
 
     def __init__(
@@ -82,19 +86,27 @@ class ContextualTokenSAE(nn.Module):
         self.adaptive_topk = AdaptiveTopKSoftmax(tau=tau)
         self.decoder = nn.Linear(d_latent, d_recon_out)
 
-    def forward(self, x_context_packed: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def forward(
+        self,
+        x_context_packed: Tensor,
+        latent_hook: Optional[Callable[[Tensor], Tensor]] = None,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Args:
             x_context_packed: (sum L_i^2, d_context_in) stacked context tokens.
+            latent_hook: If set, ``f(latents) -> latents'`` applied after sparsity, before
+                the decoder. Use for ablations (zero some dims) or steering (add α·v).
 
         Returns:
             recon_packed: (sum L_i^2, d_recon_out)
             p_softmax: (sum L_i^2, d_latent)
-            latents: (sum L_i^2, d_latent) sparse latent activations
+            latents: (sum L_i^2, d_latent) **post-hook** sparse activations fed to decoder
         """
         z: Tensor = self.encoder(x_context_packed)
         p_softmax = torch.softmax(z, dim=-1)
         latents = self.adaptive_topk(z)
+        if latent_hook is not None:
+            latents = latent_hook(latents)
         recon_packed = torch.tanh(self.decoder(latents))
         return recon_packed, p_softmax, latents
 
